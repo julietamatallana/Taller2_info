@@ -1,11 +1,14 @@
+import numpy as np
 import pandas as pd
 import scipy.io as sio
 import matplotlib.pyplot as plt
 import scipy.signal as signal
+import nibabel as nib
+import cv2
 
 # Grupo 3
 # Estudiantes:
-# - Nombre Miguel Ángel Piedrahita Sánchez
+# - Nombre Miguel Ángel Piedrahita
 # - Nombre Danna Julieta Matallana
 # Unidad 2 - Taller Evaluativo: Introducción a la computación en Bioingeniería
 
@@ -59,7 +62,7 @@ ecg_taqui = sio.loadmat('ecg_taqui.mat')
 class Signal:
     def __init__(self, label):
         self.__data = []
-        self.__filtro = [] #Este atributo será en el que se harán todos los procesamientos e igual seguir teniendo acceso a los datos originales
+        self.__filtro = self.__data.copy() #Este atributo será en el que se harán todos los procesamientos e igual seguir teniendo acceso a los datos originales
         self.__tiempo = []
         self.label = label
         self.inicio = 0 #Los límites de la muestra que se asignarán en la función corteMuestra
@@ -76,7 +79,7 @@ class Signal:
     def filtroNotch(self):
         b,a = signal.iirnotch(60, 30, 500) #Se utiliza un factor de calidad Q = 30 porque es común utilizar este valor en ECG
         self.__filtro = signal.filtfilt(b,a,self.__data)
-    def corteMuestra(self,canal=0,pmin=500,pmax=1000):
+    def corteMuestra(self,canal=0,pmin=300,pmax=800):
         self.inicio = pmin
         self.final = pmax
         self.__filtro = self.__filtro[canal,pmin:pmax] #Ajustar el tamaño de la muestra
@@ -122,3 +125,65 @@ print('COMPARACIÓN ENTRE SEÑALES:\n') #Mostrar de manera gráfica las diferenc
 print(f"{'Estadística':<20} {'Sano':<15} {'Taquicardia':<15} {'Diferencia':<15}")
 print(f"{'Media':<20} {señal_sano.mean:<15.2f} {señal_taqui.mean:<15.2f} {abs(señal_sano.mean - señal_taqui.mean):<15.2f}")
 print(f"{'Desv. Estándar':<20} {señal_sano.std:<15.2f} {señal_taqui.std:<15.2f} {abs(señal_sano.std - señal_taqui.std):<15.2f}")
+
+
+#PARTE 3 DEL TALLER
+class Graficadora():
+    def __init__(self,imagen):
+        self.imagen = imagen
+        self.filtrado = []
+   
+    def graficarImagenes(self, titulo_grafico): 
+        plt.figure(figsize=(10,4)) #Graficar
+        plt.subplot(1,2,1)
+        plt.imshow(self.imagen, cmap='gray')
+        plt.title('Imagen original')
+
+        plt.subplot(1,2,2)
+        plt.imshow(self.filtrado, cmap='gray')
+        plt.title(f'Imagen filtro {titulo_grafico}')
+        plt.show()
+
+    def filtroGaussiano(self): #Aplica un suavizado para reducir el ruido o suavizar detalles
+        self.filtrado = cv2.GaussianBlur(self.imagen, (5,5), 0)
+        self.graficarImagenes('Gaussiano')
+    
+    def filtroOperaciones(self): #Suaviza detalles y separa objetos que estén ligeramente conectados
+        kernel = np.ones((3,3), np.uint8)
+        self.filtrado = cv2.morphologyEx(self.imagen, cv2.MORPH_OPEN, kernel)
+        self.graficarImagenes('Operaciones Morfológicas')
+
+    def filtroUmbral(self): #Convierte la imagen en un blanco y negro. Las regiones brillantes se separan localmente
+        self.filtrado = cv2.adaptiveThreshold(self.imagen, 255,
+                                          cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                          cv2.THRESH_BINARY, 11, 2)
+        self.graficarImagenes('Umbralización adaptativa')
+
+    def filtroBordes(self): #Detecta los contornos de la imagen para extraer características
+        self.filtrado = cv2.Canny(self.imagen, 100, 200)
+        self.graficarImagenes('Detección de bordes')
+
+    def filtroTransformacion(self): #Rota la imagen. Útil cuando se necesita alinear imágenes o corregir orientación
+        rows, cols = self.imagen.shape
+        M = cv2.getRotationMatrix2D((cols/2, rows/2), 15, 1)
+        self.filtrado = cv2.warpAffine(self.imagen, M, (cols, rows))
+        self.graficarImagenes('Transformación geométrica')
+ 
+    def mostrarFiltros(self):
+        self.filtroGaussiano()
+        self.filtroUmbral()
+        self.filtroOperaciones()
+        self.filtroBordes()
+        self.filtroTransformacion()
+ 
+importado = nib.load('imagen_resonancia.nii') #Se filtra la imagen
+imagen = importado.get_fdata()
+imagen = imagen[:,:,150] #Se escoge un corte aleatorio para mostrar
+imagen = (imagen / (imagen.max() / 255)).astype(np.uint8) #Esto se hace porque algunos filtros de cv2 solo aceptan valores en uint8. Para dejarlo en valores de 0-255 se hace la división mostrada y los filtros funcionarán sin problema
+
+graficadora = Graficadora(imagen)
+graficadora.mostrarFiltros()
+
+#En el ECG taquicárdico se encontraron más picos en el mismo periodo de tiempo que el ECG sano. Esto es completamente coherente con un ritmo cardíaco más acelerado. Por otro lado, el ECG taquicárdico tiene ondas de baja frecuencia, lo cual lo hace más inestable e impredecible que el ECG sano
+#El promedio del ECG taquicárdico fue mayor que el del ECG sano. Esto muestra que la señal de ECG taquicárdica tiene mayor número de picos y experimenta mayor actividad eléctrica en un mismo periodo de tiempo. Por otro lado, que la desviación estandar sea mayor en el ECG taquicárdico, demuestra su variabilidad. Son signos de arritmia ya que no tienen un pulso constante y predecible
+#En general, los filtros en las imágenes de la resonancia no necesariamente mejoran la imagen, pero, juegan un rol importante a la hora de procesar este tipo de imágenes para un análisis ulterior. La finalidad de cada filtro ya está dispuesta en su aplicación
